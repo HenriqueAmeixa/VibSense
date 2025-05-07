@@ -3,19 +3,37 @@
 #include <Wire.h>
 #include <MPU6050_light.h>
 #include <ArduinoJson.h>
+#include <vector>
 
 const char* ssid = "BACONLOGA";
 const char* password = "a1b2c3d4e5";
-const char* server = "https://apisensor.azurewebsites.net/api/SensorReadings";
+const char* server = "https://apisensor.azurewebsites.net/api/SensorReadings/lote";
 const char* deviceId = "f68fb3dd-65b9-47c3-b638-1bad36be5e37";
 
 MPU6050 mpu(Wire);
-const int pinBotao = 33;
+
+const int pinBotaoCalibrar = 32;
+const int pinBotaoEnvio = 33;
+
+bool envioAtivo = true;
+bool estadoAnteriorBotaoEnvio = HIGH;
+
+struct LeituraMPU {
+  float x, y, z;
+  unsigned long timestamp;
+};
+
+// 💡 taxa configurável:
+const int taxaAmostragemHz = 140;
+const unsigned long duracaoCaptura = 1000; // 1 segundo
+std::vector<LeituraMPU> bufferLeituras;
 
 void setup() {
   Serial.begin(115200);
   Wire.begin(27, 26);
-  pinMode(pinBotao, INPUT_PULLUP);
+
+  pinMode(pinBotaoCalibrar, INPUT_PULLUP);
+  pinMode(pinBotaoEnvio, INPUT_PULLUP);
 
   Serial.print("Conectando no WiFi");
   WiFi.begin(ssid, password);
@@ -24,9 +42,7 @@ void setup() {
   }
   Serial.println("\nWiFi conectado!");
 
-  // Configura fuso horário UTC (offset 0) e servidores NTP
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  Serial.println("Sincronizando horário com NTP...");
 
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
@@ -51,28 +67,50 @@ String getISO8601Time() {
   return String(buf);
 }
 
-void loop() {
-  mpu.update();
+void capturarAmostrasPor1Segundo() {
+  bufferLeituras.clear();
+  unsigned long tempoInicio = millis();
+  unsigned long intervaloAmostra = 1000 / taxaAmostragemHz;
+  unsigned long proximaAmostra = tempoInicio;
 
-  if (digitalRead(pinBotao) == LOW) {
-    Serial.println("Recalibrando MPU...");
-    mpu.calcOffsets(true, true);
-    Serial.println("Recalibração concluída.");
-    delay(1000);
+  while (millis() - tempoInicio < duracaoCaptura) {
+    if (millis() >= proximaAmostra) {
+      mpu.update();
+      LeituraMPU leitura;
+      leitura.x = mpu.getAccX();
+      leitura.y = mpu.getAccY();
+      leitura.z = mpu.getAccZ();
+      leitura.timestamp = millis();
+      bufferLeituras.push_back(leitura);
+      proximaAmostra += intervaloAmostra;
+    }
+    delay(1); // evita uso 100% da CPU
   }
 
-  StaticJsonDocument<256> doc;
+  Serial.print("Capturadas ");
+  Serial.print(bufferLeituras.size());
+  Serial.println(" amostras.");
+}
+
+void enviarAmostras() {
+  StaticJsonDocument<8192> doc;
   doc["deviceId"] = deviceId;
-  doc["accelX"] = mpu.getAccX();
-  doc["accelY"] = mpu.getAccY();
-  doc["accelZ"] = mpu.getAccZ();
-  doc["temperature"] = 0;  // Pode remover se não quiser enviar nada
   doc["timestamp"] = getISO8601Time();
+  JsonArray leituras = doc.createNestedArray("leituras");
+
+  for (auto& l : bufferLeituras) {
+    JsonObject obj = leituras.createNestedObject();
+    obj["x"] = l.x;
+    obj["y"] = l.y;
+    obj["z"] = l.z;
+    obj["ms"] = l.timestamp;
+  }
 
   String json;
   serializeJson(doc, json);
-
-  Serial.println("Enviando JSON:");
+  Serial.print("Enviando lote com ");
+  Serial.print(bufferLeituras.size());
+  Serial.println(" amostras:");
   Serial.println(json);
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -80,12 +118,42 @@ void loop() {
     http.begin(server);
     http.addHeader("Content-Type", "application/json");
     int response = http.POST(json);
-    Serial.print("Código de resposta HTTP: ");
+    Serial.print("Código HTTP: ");
     Serial.println(response);
     http.end();
   } else {
-    Serial.println("WiFi desconectado! Dados não enviados.");
+    Serial.println("WiFi desconectado. Dados não enviados.");
+  }
+}
+
+void loop() {
+  // Atualiza leitura da MPU continuamente
+  mpu.update();
+
+  // Botão de calibração
+  if (digitalRead(pinBotaoCalibrar) == LOW) {
+    Serial.println("Recalibrando MPU...");
+    mpu.calcOffsets(true, true);
+    Serial.println("Recalibração concluída.");
+    delay(1000);
   }
 
-  delay(100); // 10 Hz
+  // Alternância de envio com botão
+  bool estadoAtualBotaoEnvio = digitalRead(pinBotaoEnvio);
+  if (estadoAtualBotaoEnvio == LOW && estadoAnteriorBotaoEnvio == HIGH) {
+    envioAtivo = !envioAtivo;
+    Serial.print("Envio de dados: ");
+    Serial.println(envioAtivo ? "ATIVADO" : "DESATIVADO");
+    delay(500);
+  }
+  estadoAnteriorBotaoEnvio = estadoAtualBotaoEnvio;
+
+  if (!envioAtivo) {
+    delay(100);
+    return;
+  }
+
+  // 🚀 Coleta e envio controlado por 1 segundo
+  capturarAmostrasPor1Segundo();
+  enviarAmostras();
 }
