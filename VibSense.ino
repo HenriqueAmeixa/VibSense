@@ -9,9 +9,9 @@ const char* ssid = "BACONLOGA";
 const char* password = "a1b2c3d4e5";
 const char* server = "https://apisensor.azurewebsites.net/api/SensorReadings/lote";
 const char* deviceId = "f68fb3dd-65b9-47c3-b638-1bad36be5e37";
+const char* apiKey = "abc123secretapikeyxyz";  // SUA API KEY
 
 MPU6050 mpu(Wire);
-
 const int pinBotaoCalibrar = 32;
 const int pinBotaoEnvio = 33;
 
@@ -23,9 +23,8 @@ struct LeituraMPU {
   unsigned long timestamp;
 };
 
-// 💡 taxa configurável:
 const int taxaAmostragemHz = 140;
-const unsigned long duracaoCaptura = 1000; // 1 segundo
+const unsigned long duracaoCaptura = 1000;
 std::vector<LeituraMPU> bufferLeituras;
 
 void setup() {
@@ -84,7 +83,7 @@ void capturarAmostrasPor1Segundo() {
       bufferLeituras.push_back(leitura);
       proximaAmostra += intervaloAmostra;
     }
-    delay(1); // evita uso 100% da CPU
+    delay(1);
   }
 
   Serial.print("Capturadas ");
@@ -100,9 +99,9 @@ void enviarAmostras() {
 
   for (auto& l : bufferLeituras) {
     JsonObject obj = leituras.createNestedObject();
-    obj["x"] = l.x;
-    obj["y"] = l.y;
-    obj["z"] = l.z;
+    obj["accelX"] = l.x;
+    obj["accelY"] = l.y;
+    obj["accelZ"] = l.z;
     obj["ms"] = l.timestamp;
   }
 
@@ -117,6 +116,7 @@ void enviarAmostras() {
     HTTPClient http;
     http.begin(server);
     http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", String("ApiKey ") + apiKey);  // ✅ header correto
     int response = http.POST(json);
     Serial.print("Código HTTP: ");
     Serial.println(response);
@@ -127,10 +127,8 @@ void enviarAmostras() {
 }
 
 void loop() {
-  // Atualiza leitura da MPU continuamente
   mpu.update();
 
-  // Botão de calibração
   if (digitalRead(pinBotaoCalibrar) == LOW) {
     Serial.println("Recalibrando MPU...");
     mpu.calcOffsets(true, true);
@@ -138,7 +136,6 @@ void loop() {
     delay(1000);
   }
 
-  // Alternância de envio com botão
   bool estadoAtualBotaoEnvio = digitalRead(pinBotaoEnvio);
   if (estadoAtualBotaoEnvio == LOW && estadoAnteriorBotaoEnvio == HIGH) {
     envioAtivo = !envioAtivo;
@@ -153,7 +150,6 @@ void loop() {
     return;
   }
 
-  // 🚀 Coleta e envio controlado por 1 segundo
   capturarAmostrasPor1Segundo();
   enviarAmostras();
 }
