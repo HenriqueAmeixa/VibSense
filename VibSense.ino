@@ -14,16 +14,17 @@ const char* apiKey = "abc123secretapikeyxyz";  // SUA API KEY
 MPU6050 mpu(Wire);
 const int pinBotaoCalibrar = 32;
 const int pinBotaoEnvio = 33;
+const int ledStatus = 2;
 
-bool envioAtivo = true;
-bool estadoAnteriorBotaoEnvio = HIGH;
+bool envioAtivo = false;
+bool estadoAnteriorBotaoEnvio;
 
 struct LeituraMPU {
   float x, y, z;
   unsigned long timestamp;
 };
 
-const int taxaAmostragemHz = 140;
+const int taxaAmostragemHz = 500;
 const unsigned long duracaoCaptura = 1000;
 std::vector<LeituraMPU> bufferLeituras;
 
@@ -33,6 +34,11 @@ void setup() {
 
   pinMode(pinBotaoCalibrar, INPUT_PULLUP);
   pinMode(pinBotaoEnvio, INPUT_PULLUP);
+  estadoAnteriorBotaoEnvio = digitalRead(pinBotaoEnvio);
+
+  pinMode(ledStatus, OUTPUT);
+  digitalWrite(ledStatus, envioAtivo ? HIGH : LOW);
+
 
   Serial.print("Conectando no WiFi");
   WiFi.begin(ssid, password);
@@ -139,6 +145,7 @@ void loop() {
   bool estadoAtualBotaoEnvio = digitalRead(pinBotaoEnvio);
   if (estadoAtualBotaoEnvio == LOW && estadoAnteriorBotaoEnvio == HIGH) {
     envioAtivo = !envioAtivo;
+    digitalWrite(ledStatus, envioAtivo ? HIGH : LOW);
     Serial.print("Envio de dados: ");
     Serial.println(envioAtivo ? "ATIVADO" : "DESATIVADO");
     delay(500);
