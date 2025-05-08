@@ -52,7 +52,7 @@ O ESP32 envia os dados no formato de lote:
       "accelX": -0.004,
       "accelY": 0.002,
       "accelZ": 1.009,
-      "millisecondsSinceStart": 123
+      "ms": 123
     }
   ]
 }
